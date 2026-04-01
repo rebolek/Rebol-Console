@@ -38,6 +38,18 @@ state: context [
 	tab-data:  none
 ]
 
+;; Word completion support
+
+words-cache: none
+lib-size: none
+user-size: none
+
+cache-words: func [ ctx [object!] ] [
+	lib-size: length? system/contexts/lib
+	user-size: length? any [ctx system/contexts/user]
+	words-cache: sort union words-of system/contexts/lib words-of any [ctx system/contexts/user]
+]
+
 ;; Object/function completion support
 
 collect-refs: function [fn [any-function!]] [
@@ -161,18 +173,21 @@ complete-input: function [
 			]
 		]
 		find part #"/" [ ; Path completion
-			refs: any [
+			best-matches: any [
 				scan-context system/contexts/sys part
 				scan-context system/contexts/lib part
 				scan-context system/contexts/user part
 			]
-			return refs
-			;print ["^[[G^[[K" mold refs]
-
 		]
 		not empty? part [ ; Word completion
-			;@@ all-words should not be created on each completion call!
-			all-words: sort union words-of system/contexts/lib words-of any [ctx system/contexts/user]
+			all-words: either any [
+				(length? system/contexts/lib) <> lib-size
+				(length? any [ctx system/contexts/user]) <> user-size
+			] [
+				cache-words ctx
+			] [
+				words-cache
+			]
 			forall all-words [all-words/1: to string! all-words/1]
 
 			either matching-part: did find all-words part [
