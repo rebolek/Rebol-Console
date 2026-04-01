@@ -37,6 +37,99 @@ state: context [
 	tab-match: none
 	tab-data:  none
 ]
+
+;; Word completion support
+
+words-cache: none
+lib-size: none
+user-size: none
+
+cache-words: func [ ctx [object!] ] [
+	lib-size: length? system/contexts/lib
+	user-size: length? any [ctx system/contexts/user]
+	words-cache: sort union words-of system/contexts/lib words-of any [ctx system/contexts/user]
+]
+
+;; Object/function completion support
+
+collect-refs: func [fn [any-function!] /local ref] [
+	parse spec-of :fn [
+		collect [any [set ref refinement! keep (form ref) | skip]]
+	]
+]
+
+form-all: func [
+	"Convert block of words to block of strings"
+	block [block!]
+] [
+	split form block space
+]
+
+filter-matches: function [
+	"From block of strings, return only those matching pattern"
+	block [block!]
+	pattern [string!]
+] [
+	remove-each value block [ not find/match value pattern ]
+]
+
+scan-context: function [
+	ctx [object!]
+	part [string!]
+] [
+	path: split part #"/"
+	foreach [key val] ctx [
+		switch type? :val [
+			#(native!) #(action!) #(function!) #(closure!) [
+				if equal? path/1 form key [
+					return either empty? last path [ ; part is `word/` -> ["word" ""]
+						collect-refs :val
+					] [
+						; possible optimization:
+						; if refinement is already present, do not offer it
+						filter-matches collect-refs :val last path
+					]
+				]
+			]
+			#(object!) #(module!) #(error!) #(port!) #(block!) [
+				if equal? path/1 form key [
+					return case [
+						; top level object
+						all [ empty? last path 2 = length? path ] [
+							form-all words-of :val
+						]
+						; subobject
+						empty? last path [
+							take/last path
+							result: get to path! load path
+							case [
+								any-object? result [ form-all words-of result ]
+							;	block? result [ rejoin ["1 - " length? result ] ]
+								'else ["???"]
+							]
+						]
+						'else [
+							either attempt [ get to path! load path ] [
+								; fully resolved path, nothing to add
+								[]
+							] [
+								; partial word from subobject
+								partial: take/last path
+								result: either single? path [
+									form-all words-of get load path/1
+								] [
+									form-all words-of get to path! load path
+								]
+								filter-matches result partial
+							]
+						]
+					]
+				]
+			]
+		]
+	]
+]
+
 ;; Input completion function.
 complete-input: function [
 	input     [string!] "Current line to be completed"
@@ -59,10 +152,22 @@ complete-input: function [
 				]
 			]
 		]
+		find part #"/" [ ; Path completion
+			best-matches: any [
+				scan-context system/contexts/sys part
+				scan-context system/contexts/lib part
+				scan-context system/contexts/user part
+			]
+		]
 		not empty? part [ ; Word completion
-			;@@ all-words should not be created on each completion call!
-			all-words: sort union words-of system/contexts/lib words-of any [ctx system/contexts/user]
-			forall all-words [all-words/1: to string! all-words/1]
+			all-words: form-all either any [
+				(length? system/contexts/lib) <> lib-size
+				(length? any [ctx system/contexts/user]) <> user-size
+			] [
+				cache-words ctx
+			] [
+				words-cache
+			]
 
 			best-matches: copy []
 			foreach word all-words [
