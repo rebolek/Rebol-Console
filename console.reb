@@ -221,13 +221,13 @@ new-console: function/with [
 		skip-back: does [
 			unless head? pos [
 				pos: back pos
-				-- col
+				col: col - pos/1/width
 			]
 		]
 		skip-next: does [
 			unless tail? pos [
+				col: col + pos/1/width
 				pos: next pos
-				++ col
 			]
 		]
 		skip-to: func[pos][
