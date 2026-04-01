@@ -81,7 +81,7 @@ scan-context: function [
 		switch type? :val [
 			#(native!) #(action!) #(function!) #(closure!) [
 				if equal? path/1 form key [
-					return either empty? last path [ ; part is `word/` -> ["word" ""]
+					matches: either empty? last path [ ; part is `word/` -> ["word" ""]
 						collect-refs :val
 					] [
 						; possible optimization:
@@ -92,7 +92,7 @@ scan-context: function [
 			]
 			#(object!) #(module!) #(error!) #(port!) #(block!) [
 				if equal? path/1 form key [
-					return case [
+					matches: case [
 						; top level object
 						all [ empty? last path 2 = length? path ] [
 							form-all words-of :val
@@ -127,6 +127,9 @@ scan-context: function [
 			]
 		]
 	]
+	prefix: combine/with path #"/"
+	unless equal? #"/" last prefix [append prefix #"/"]
+	forall matches [matches/1: join prefix matches/1]
 ]
 
 ;; Input completion function.
