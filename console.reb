@@ -127,9 +127,12 @@ scan-context: function [
 			]
 		]
 	]
-	prefix: combine/with path #"/"
-	unless equal? #"/" last prefix [append prefix #"/"]
-	forall matches [matches/1: join prefix matches/1]
+	either block? matches [
+		prefix: combine/with path #"/"
+		unless equal? #"/" last prefix [append prefix #"/"]
+		forall matches [matches/1: join prefix matches/1]
+		head matches
+	] [ none ]
 ]
 
 ;; Input completion function.
@@ -389,9 +392,7 @@ new-console: function/with [
 								]
 								tab-index: 1 + mod tab-index length? best-matches
 
-								tab-match: either #"/" == last start-part [
-									best-matches/:tab-index
-								][	find/match/tail best-matches/:tab-index start-part ]
+								tab-match: find/match/tail best-matches/:tab-index start-part
 								append pos tab-match
 								emit pos
 								skip-to-end
