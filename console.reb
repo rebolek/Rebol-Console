@@ -52,7 +52,7 @@ cache-words: func [ ctx [object!] ] [
 
 ;; Object/function completion support
 
-collect-refs: function [fn [any-function!]] [
+collect-refs: func [fn [any-function!] /local ref] [
 	parse spec-of :fn [
 		collect [any [set ref refinement! keep (form ref) | skip]]
 	]
@@ -180,7 +180,7 @@ complete-input: function [
 			]
 		]
 		not empty? part [ ; Word completion
-			all-words: either any [
+			all-words: form-all either any [
 				(length? system/contexts/lib) <> lib-size
 				(length? any [ctx system/contexts/user]) <> user-size
 			] [
@@ -188,7 +188,6 @@ complete-input: function [
 			] [
 				words-cache
 			]
-			forall all-words [all-words/1: to string! all-words/1]
 
 			either matching-part: did find all-words part [
 				matching-part: SP
