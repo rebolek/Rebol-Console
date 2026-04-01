@@ -215,9 +215,6 @@ new-console: function/with [
 			if block? s [s: ajoin s]
 			append buffer s
 		]
-		emit-ch: func[c [char!] num [integer!]][
-			append/dup buffer c num
-		]
 		skip-back: does [
 			unless head? pos [
 				pos: back pos
@@ -259,14 +256,10 @@ new-console: function/with [
 		]
 
 		forever [
-			time: stats/timer
-			key: read-key
-			;unless char? key [
-			;    emit [clear-line mold key LF prompt line]
-			;]
 			clear buffer
 			prev-col: col
-			switch/default key [
+			time: stats/timer
+			switch/default key: read-key [
 				;- DEL/Backspace  
 				#"^~"
 				#"^H" [
@@ -292,7 +285,6 @@ new-console: function/with [
 							tmp: pos
 							skip-to-next-delimiter
 							pos: remove/part tmp pos
-							col: prev-col
 						][	;; delete following char
 							pos: remove pos
 						]
@@ -448,10 +440,7 @@ new-console: function/with [
 					col: line/width
 				]
 			][
-				if all [
-					char? key
-					key > 0#1F
-				][
+				if all [char? key  key > 0#1F][
 					emit back pos: insert pos key
 					col: col + key/width
 					if tail? pos [prev-col: col]
