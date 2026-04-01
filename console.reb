@@ -29,12 +29,12 @@ state: context [
 	time:       none     ;; used to detect TAB while PASTE
 	key:        none     ;; current key
 	eval-ctx:   none     ;; used to hold per/session evaluation context
-	col: 0
-	tab-index: 0
-	tab-col:   0
-	tab-input: none
-	tab-match: none
-	tab-data:  none
+	col:        0        ;; current cursor position
+	tab-index:  0        ;; current position in the cycling list
+	tab-col:    0        ;; column position before tab-match was inserted
+	tab-line:   none     ;; line content at the time TAB was pressed, used to detect changes
+	tab-match:  none     ;; currently inserted completion
+	tab-result: none     ;; cached result of complete-input [start matches]
 ]
 
 ;; Word completion support
@@ -139,7 +139,7 @@ scan-context: function [
 complete-input: function [
 	input     [string!] "Current line to be completed"
 	/with ctx [object!] "Optional context to search words instead of the user's context."
-	return:   [block! ] "[start-part best-matches]"
+	return:   [block! ] "[start matches]"
 ][
 	part: any [
 		find/last/tail input SP
@@ -150,15 +150,15 @@ complete-input: function [
 			part: as file! next part
 			path-parts: split-path part
 			files: sort read path-parts/1
-			best-matches: copy []
+			matches: copy []
 			foreach file files [
 				if parse file [part to end][
-					append best-matches to string! file
+					append matches to string! file
 				]
 			]
 		]
 		find part #"/" [ ; Path completion
-			best-matches: any [
+			matches: any [
 				scan-context system/contexts/sys part
 				scan-context system/contexts/lib part
 				scan-context any [ctx system/contexts/user] part
@@ -174,15 +174,15 @@ complete-input: function [
 				words-cache
 			]
 
-			best-matches: copy []
+			matches: copy []
 			foreach word all-words [
 				if parse word [ part to end ] [
-					append best-matches word
+					append matches word
 				]
 			]
 		]
 	]
-	reduce [as string! part best-matches]
+	reduce [as string! part matches]
 ]
 
 ;; Main function.
@@ -251,7 +251,7 @@ new-console: function/with [
 			prev-prompt: none width: 0
 		]
 		reset-tab: does [
-			tab-match: tab-input: none
+			tab-match: tab-line: none
 			tab-col: tab-index: 0
 		]
 
@@ -358,20 +358,20 @@ new-console: function/with [
 							]
 							if any [
 								not tab-match
-								tab-input != line
+								tab-line != line
 							][
 								tab-index: 0
 								tab-match: none
-								tab-input: line
+								tab-line:  line
 								tab-col:   col
-								tab-data: complete-input/with line eval-ctx
+								tab-result: complete-input/with line eval-ctx
 								
 							]
-							set [start-part: best-matches:] tab-data
-							if empty? best-matches [ continue ]
-							either all [system/state/shift? not single? best-matches] [
+							set [start: matches:] tab-result
+							if empty? matches [ continue ]
+							either all [system/state/shift? not single? matches] [
 								;; SHIFT+TAB — show all matches
-								emit [clear-line mold best-matches]
+								emit [clear-line mold matches]
 								emit [LF prompt line]
 								skip-to-end
 								;; Reset cycle on SHIFT+TAB
@@ -382,9 +382,9 @@ new-console: function/with [
 									skip-to tab-col
 									emit "^[[K"
 								]
-								tab-index: 1 + mod tab-index length? best-matches
+								tab-index: 1 + mod tab-index length? matches
 
-								tab-match: find/match/tail best-matches/:tab-index start-part
+								tab-match: find/match/tail matches/:tab-index start
 								append pos tab-match
 								emit pos
 								skip-to-end
