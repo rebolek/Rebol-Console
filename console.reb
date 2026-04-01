@@ -127,9 +127,12 @@ scan-context: function [
 			]
 		]
 	]
-	prefix: combine/with path #"/"
-	unless equal? #"/" last prefix [append prefix #"/"]
-	forall matches [matches/1: join prefix matches/1]
+	either block? matches [
+		prefix: combine/with path #"/"
+		unless equal? #"/" last prefix [append prefix #"/"]
+		forall matches [matches/1: join prefix matches/1]
+		head matches
+	] [ none ]
 ]
 
 ;; Input completion function.
