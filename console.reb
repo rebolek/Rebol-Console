@@ -26,6 +26,9 @@ move-start:  "^[[G"
 highlight:   "^[[7m"
 reset-style: "^[[m"
 prompt-counter: #"0"
+
+move-left-by: func [n] [rejoin ["^[[" n #"D"]]
+
 ;; Console's state template.
 state: context [
 	prompt: as-red "## "
@@ -258,7 +261,17 @@ new-console: function/with [
 			tab-match: tab-input: none
 			tab-col: tab-index: 0
 		]
-		tab-help?: false
+		tab-help-line?: false ; is tab help line added?
+		tab-help?: false      ; is tab help shown?
+		clear-tab-help: does [
+			if tab-help? [
+				emit save-cur
+				emit move-down
+				emit clear-line
+				emit rest-cur
+				tab-help?: false
+			]
+		]
 
 		forever [
 			time: stats/timer
@@ -322,12 +335,8 @@ new-console: function/with [
 						]
 						pos: clear line
 						col: prev-col: 0
-			if tab-help? [
-				emit save-cur
-				emit clear-line
-				emit rest-cur
-				tab-help?: false
-			]
+						clear-tab-help
+						tab-help-line?: false
 						case [
 							unset? :res [] ;; ignore
 							error? :res [
@@ -407,50 +416,50 @@ new-console: function/with [
 								all [system/state/shift? not single? best-matches]
 								key = 'backtab
 							] [
-								;; SHIFT+TAB — show all matches
-								emit [clear-line mold best-matches]
-								emit [LF prompt line]
-								skip-to-end
-								;; Reset cycle on SHIFT+TAB
-								tab-index: 0 tab-match: none
+								;; SHIFT+TAB — rotate back
+								if zero? tab-index: tab-index - 1 [
+									tab-index: length? best-matches
+								]
 							][	;; TAB cycling through matches
 								;; Strip previous cycled match if any
 								tab-index: 1 + mod tab-index length? best-matches
-
-								tab-match: either #"/" == last start-part [
-									best-matches/:tab-index
-								][	find/match/tail best-matches/:tab-index start-part ]
-								; on first <TAB> press, add help line
-								if tab-index = 1 [
-									tab-help?: true
-									emit LF
-									emit move-up
-								]
-								; on all <TAB> presses, show help
-								emit save-cur
-								emit move-down
-								emit move-start
-
-								repeat i length? best-matches [
-									either i = tab-index [
-										emit highlight
-										emit best-matches/:i
-										emit reset-style
-									] [
-										emit best-matches/:i
-									]
-									emit space
-								]
-								emit rest-cur
-								; now complete on edit line
-								if tab-col > 0 [
-									skip-to tab-col
-									emit "^[[K"
-								]
-								append pos tab-match
-								emit pos
-								skip-to-end
 							]
+
+							tab-match: either find probe start-part #"/" [
+								remove next find/last start-part #"/"
+								best-matches/:tab-index
+							][	find/match/tail best-matches/:tab-index start-part ]
+							; on first <TAB> press, add help line
+							if all [not tab-help-line? tab-index = 1] [
+								tab-help?: true
+								tab-help-line?: true
+								emit LF
+								emit move-up
+							]
+							; on all <TAB> presses, show help
+							emit save-cur
+							emit move-down
+							emit move-start
+
+							repeat i length? best-matches [
+								either i = tab-index [
+									emit highlight
+									emit best-matches/:i
+									emit reset-style
+								] [
+									emit best-matches/:i
+								]
+								emit space
+							]
+							emit rest-cur
+							; now complete on edit line
+							if tab-col > 0 [
+								skip-to tab-col
+								emit "^[[K"
+							]
+							append pos tab-match
+							emit pos
+							skip-to-end
 						]
 					]
 				]
@@ -502,6 +511,7 @@ new-console: function/with [
 					col: line/width
 				]
 			][
+				if #" " = key [clear-tab-help]
 				if all [
 					char? key
 					key > 0#1F
