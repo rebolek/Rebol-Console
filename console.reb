@@ -55,7 +55,7 @@ cache-words: func [ ctx [object!] ] [
 
 collect-refs: func [fn [any-function!] /local ref] [
 	parse spec-of :fn [
-		collect [any [set ref refinement! keep (form ref) | skip]]
+		collect any [set ref refinement! keep (form ref) | skip]
 	]
 ]
 
@@ -135,6 +135,63 @@ scan-context: function [
 		forall matches [matches/1: join prefix matches/1]
 		head matches
 	] [ none ]
+]
+
+
+acceptable-code: function/with [
+	"Returns the currently open bracket if the code can be fixed with additional edits."
+	;; If it has a missing (but balanced) closing parenthesis.
+    code [string!]
+][
+    stack: clear ""
+    all [
+        parse code [any code-rule ]
+        last stack
+    ]
+][
+    stack: ""
+    raw: none
+    code-char:    complement charset "[](){}^"%;^/"
+    string1-char: complement charset {"^^^/}
+    string2-char: complement charset "^^{}"
+    code-rule: [
+        some code-char
+        | block-rule
+        | paren-rule
+        | string1-rule ;= single line
+        | string2-rule ;= multiline
+        | string3-rule ;= raw-string
+        | comment-rule
+        | lf | #"%"
+    ]
+    block-rule: [
+         #"[" (append stack #"[") any code-rule
+        [#"]" (take/last stack) | end]
+    ]
+    paren-rule: [
+         #"(" (append stack #"(") any code-rule
+        [#")" (take/last stack) | end]
+    ]
+    string1-rule: [
+        #"^"" (append stack #"^"") some [
+              #"^^" skip
+            | #"^/" to end ;; failed!
+            | any string1-char
+        ] #"^"" (take/last stack)
+    ]
+    string2-rule: [
+        #"{" (append stack #"{") some [
+              #"^^" skip
+            | string2-rule
+            | any string2-char
+        ]
+        [#"}" (take/last stack) | end]
+    ]
+    string3-rule: [
+        copy raw: some #"%" (append stack #"{" insert raw "}")
+        thru raw (take/last stack)
+    ]
+    comment-rule: [#";" [to LF | to end] ]
 ]
 
 ;; Input completion function.
@@ -261,7 +318,7 @@ new-console: function/with [
 			prompt: ml-prompt
 		]
 
-		forever [
+		catch/quit [ forever [
 			clear buffer
 			prev-col: col
 			time: stats/timer
@@ -310,16 +367,11 @@ new-console: function/with [
 						history-pos: 0
 					]
 					either multiline [
-						code: try [transcode ajoin [ajoin/with multiline LF LF line]]
-					][	code: try [transcode line]]
+						res: try [transcode code: ajoin [ajoin/with multiline LF LF line]]
+					][	res: try [transcode code: line]]
 
-					either error? code [
-						;@@ Does not handle un-balanced pairs like: "[)]" !
-						if any [
-							all [code/id = 'missing code/arg2 = "]" ml-type: "["]
-							all [code/id = 'missing code/arg2 = ")" ml-type: "("]
-							all [code/id = 'invalid code/arg2 = "{" ml-type: "{"]
-						][
+					either error? res [
+						if ml-type: acceptable-code code [
 							unless multiline [
 								multiline: clear []
 								ml-prompt: :prompt  ;; store original prompt
@@ -335,13 +387,14 @@ new-console: function/with [
 						]
 						prin LF
 						reset-multiline
-						res: code
 					][
 						prin LF
 						if multiline [ reset-multiline ]
-						code: bind/new/set code eval-ctx
+						code: bind/new/set res eval-ctx
 						code: bind code system/contexts/lib
-						set/any 'res try/all code
+						set/any 'res try/all [
+							catch/quit code 
+						]
 					]
 					
 					pos: clear line
@@ -362,7 +415,7 @@ new-console: function/with [
 				]
 				;- CTRL+C          
 				#"^C" [
-					prin clear-line
+					prin [clear-line "[CTRL+C]"]
 					break
 				]
 				;- escape          
@@ -484,7 +537,7 @@ new-console: function/with [
 			;; Move cursor only if really changed its position.
 			if prev-col != col [skip-to col]
 			prin buffer
-		]
+		]] ;=catch/quit
 	] :ctx
 	unless prompt [prompt-counter: prompt-counter - 1]
 	#(unset) ;; return unset on exit
