@@ -12,7 +12,6 @@ Rebol 3.21.12 or later.
 ## Known Limitations / Todo
 
 - Grapheme clusters (e.g. 🏳️‍🌈) are not yet treated as single units
-- Multiline input is not yet supported
 
 ## License
 
