@@ -11,7 +11,7 @@ Rebol [
 	TODO: {
 		* Treat entire grapheme clusters as single units, e.g. 🏳️‍🌈
 	}
-	Needs: 3.21.12
+	Needs: 3.21.13
 	Exports: [new-console]
 ]
 
@@ -261,6 +261,8 @@ new-console: function/with [
 		new-console: :system/modules/console/new-console
 	]
 
+	system/state/quit?: false
+
 	;; Using bind/copy to be able start a console from another console
 	do bind/copy [
 		clear history
@@ -393,7 +395,11 @@ new-console: function/with [
 						code: bind/new/set res eval-ctx
 						code: bind code system/contexts/lib
 						set/any 'res try/all [
-							catch/quit code 
+							catch/quit code
+						]
+						if system/state/quit? [
+							system/state/quit?: false ;; quit only from this console
+							break
 						]
 					]
 					
@@ -415,7 +421,7 @@ new-console: function/with [
 				]
 				;- CTRL+C          
 				#"^C" [
-					prin [clear-line "[CTRL+C]"]
+					print "^/[CTRL+C]"
 					break
 				]
 				;- escape          
