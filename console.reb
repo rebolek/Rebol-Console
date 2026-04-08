@@ -263,6 +263,9 @@ new-console: function/with [
 		]
 		tab-help-line?: false ; is tab help line added?
 		tab-help?: false      ; is tab help shown?
+		tab-offset: 0         ; how much is tab help shifted
+		max-tab: 0
+		tab-dirty?: false
 		clear-tab-help: does [
 			if tab-help? [
 				emit save-cur
@@ -281,6 +284,7 @@ new-console: function/with [
 			;]
 			clear buffer
 			prev-col: col
+			term-width: query system/ports/output 'window-cols ; it's in loop, so it's resizing aware
 			switch/default key [
 				;- DEL/Backspace  
 				#"^~"
@@ -425,7 +429,7 @@ new-console: function/with [
 								tab-index: 1 + mod tab-index length? best-matches
 							]
 
-							tab-match: either find probe start-part #"/" [
+							tab-match: either find start-part #"/" [
 								remove next find/last start-part #"/"
 								best-matches/:tab-index
 							][	find/match/tail best-matches/:tab-index start-part ]
@@ -441,17 +445,37 @@ new-console: function/with [
 							emit move-down
 							emit move-start
 
+							width: 0
+
 							repeat i length? best-matches [
-								either i = tab-index [
+								idx: i + tab-offset
+								width: width + 1 + length? best-matches/:idx
+							;	print [width term-width]
+							;	print [max-tab tab-index]
+								if max-tab = tab-index [
+									tab-offset: tab-index - 1
+									tab-dirty?: true
+									break
+								]
+								if width > term-width [
+								;	tab-offset: tab-offset + 1
+									max-tab: idx
+									break
+								]
+								either idx = tab-index [
 									emit highlight
-									emit best-matches/:i
+									emit best-matches/:idx
 									emit reset-style
 								] [
-									emit best-matches/:i
+									emit best-matches/:idx
 								]
 								emit space
 							]
 							emit rest-cur
+							if tab-dirty? [
+								emit clear-line
+								tab-dirty?: false
+							]
 							; now complete on edit line
 							if tab-col > 0 [
 								skip-to tab-col
@@ -460,6 +484,12 @@ new-console: function/with [
 							append pos tab-match
 							emit pos
 							skip-to-end
+								emit save-cur
+								emit "^[[H"
+								emit max-tab
+								emit space
+								emit tab-index
+								emit rest-cur
 						]
 					]
 				]
