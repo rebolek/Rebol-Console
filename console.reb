@@ -261,6 +261,7 @@ new-console: function/with [
 	]
 	ctx/eval-ctx: context [
 		new-console: :system/modules/console/new-console
+		debug?: off ;; console debugging output
 	]
 
 	system/state/quit?: false
@@ -322,8 +323,15 @@ new-console: function/with [
 			prompt: ml-prompt
 		]
 
-		show-status: func[txt][
-			if block? txt [txt: reform txt]
+		show-status: function [txt][
+			;; limit output to max line width...
+			max-cols: query system/ports/output 'window-cols 
+			txt: reform txt
+			if txt/length >= max-cols [ 
+				clear skip txt max-cols - 3
+				append txt "..."
+			]
+
 			prin ajoin [
 				"^/^[[K" ;= next line + clear to end
 				txt      ;= content to print
@@ -337,7 +345,9 @@ new-console: function/with [
 			prev-col: col
 			time: stats/timer
 			key: read-key
-			show-status ["key:" mold key "ctrl:" system/state/control? "shft:" system/state/shift?]
+			if eval-ctx/debug? [
+				show-status ["key:" mold key "ctrl:" system/state/control? "shft:" system/state/shift?]
+			]
 			switch/default key [
 				;- DEL/Backspace  
 				backspace
@@ -436,7 +446,7 @@ new-console: function/with [
 				]
 				;- CTRL+C          
 				#"^C" [
-					print "^/[CTRL+C]"
+					print ajoin [clear-newline as-purple "(CTRL+C)"]
 					break
 				]
 				escape #"^[" [
@@ -449,7 +459,7 @@ new-console: function/with [
 					]
 				]
 				;- TAB             
-				#"^-" [
+				#"^-" backtab [
 					;; completion only if key-time is high
 					either 0:0:0.01 > (stats/timer - time) [
 						pos: insert pos "  "
@@ -476,11 +486,12 @@ new-console: function/with [
 							]
 							set [start: matches:] tab-result
 							if empty? matches [ continue ]
-							either all [system/state/shift? not single? matches] [
+							either all [
+								any [key = 'backtab system/state/shift?]
+								not single? matches
+							][
 								;; SHIFT+TAB — show all matches
-								emit [clear-line mold matches]
-								emit [LF prompt line]
-								skip-to-end
+								show-status mold matches
 								;; Reset cycle on SHIFT+TAB
 								tab-index: 0 tab-match: none
 							][	;; TAB cycling through matches
