@@ -3,13 +3,12 @@ Rebol [
 	Type:    module
 	Name:    console
 	Date:    1-Apr-2026
-	Version: 0.2.0
+	Version: 0.3.0
 	Author: [@Oldes @PCarlsson @Rebolek]
 	Home:    https://github.com/Oldes/Rebol-Console
 	License: MIT
 	Purpose: {A lightweight, feature-complete interactive REPL with line editing, history, and tab completion, written in pure Rebol.}
 	TODO: {
-		* Multiline input
 		* Treat entire grapheme clusters as single units, e.g. 🏳️‍🌈
 	}
 	Needs: 3.21.12
@@ -17,7 +16,7 @@ Rebol [
 ]
 
 delimiters: charset { /%[({})];:"}
-clear-line:  "^[[G^[[K"
+clear-line:  "^[[G^[[K"  ;; go to line start, clear to its end
 save-cur:    "^[[s"
 rest-cur:    "^[[u"
 move-up:     "^[[1A"
@@ -39,12 +38,15 @@ state: context [
 	time:       none     ;; used to detect TAB while PASTE
 	key:        none     ;; current key
 	eval-ctx:   none     ;; used to hold per/session evaluation context
-	col: 0
-	tab-index: 0
-	tab-col:   0
-	tab-input: none
-	tab-match: none
-	tab-data:  none
+	col:        0        ;; current cursor position
+	tab-index:  0        ;; current position in the cycling list
+	tab-col:    0        ;; column position before tab-match was inserted
+	tab-line:   none     ;; line content at the time TAB was pressed, used to detect changes
+	tab-match:  none     ;; currently inserted completion
+	tab-result: none     ;; cached result of complete-input [start matches]
+	multiline:  none     ;; block of lines
+	ml-prompt:  none     ;; stored original prompt while inside multiline mode
+	ml-type:    none     ;; current bracket type
 ]
 
 ;; Word completion support
@@ -63,7 +65,7 @@ cache-words: func [ ctx [object!] ] [
 
 collect-refs: func [fn [any-function!] /local ref] [
 	parse spec-of :fn [
-		collect [any [set ref refinement! keep (form ref) | skip]]
+		collect any [set ref refinement! keep (form ref) | skip]
 	]
 ]
 
@@ -91,7 +93,7 @@ scan-context: function [
 		switch type? :val [
 			#(native!) #(action!) #(function!) #(closure!) [
 				if equal? path/1 form key [
-					return either empty? last path [ ; part is `word/` -> ["word" ""]
+					matches: either empty? last path [ ; part is `word/` -> ["word" ""]
 						collect-refs :val
 					] [
 						; possible optimization:
@@ -102,7 +104,7 @@ scan-context: function [
 			]
 			#(object!) #(module!) #(error!) #(port!) #(block!) [
 				if equal? path/1 form key [
-					return case [
+					matches: case [
 						; top level object
 						all [ empty? last path 2 = length? path ] [
 							form-all words-of :val
@@ -137,13 +139,76 @@ scan-context: function [
 			]
 		]
 	]
+	either block? matches [
+		prefix: combine/with path #"/"
+		unless equal? #"/" last prefix [append prefix #"/"]
+		forall matches [matches/1: join prefix matches/1]
+		head matches
+	] [ none ]
+]
+
+
+acceptable-code: function/with [
+	"Returns the currently open bracket if the code can be fixed with additional edits."
+	;; If it has a missing (but balanced) closing parenthesis.
+    code [string!]
+][
+    stack: clear ""
+    all [
+        parse code [any code-rule ]
+        last stack
+    ]
+][
+    stack: ""
+    raw: none
+    code-char:    complement charset "[](){}^"%;^/"
+    string1-char: complement charset {"^^^/}
+    string2-char: complement charset "^^{}"
+    code-rule: [
+        some code-char
+        | block-rule
+        | paren-rule
+        | string1-rule ;= single line
+        | string2-rule ;= multiline
+        | string3-rule ;= raw-string
+        | comment-rule
+        | lf | #"%"
+    ]
+    block-rule: [
+         #"[" (append stack #"[") any code-rule
+        [#"]" (take/last stack) | end]
+    ]
+    paren-rule: [
+         #"(" (append stack #"(") any code-rule
+        [#")" (take/last stack) | end]
+    ]
+    string1-rule: [
+        #"^"" (append stack #"^"") some [
+              #"^^" skip
+            | #"^/" to end ;; failed!
+            | any string1-char
+        ] #"^"" (take/last stack)
+    ]
+    string2-rule: [
+        #"{" (append stack #"{") some [
+              #"^^" skip
+            | string2-rule
+            | any string2-char
+        ]
+        [#"}" (take/last stack) | end]
+    ]
+    string3-rule: [
+        copy raw: some #"%" (append stack #"{" insert raw "}")
+        thru raw (take/last stack)
+    ]
+    comment-rule: [#";" [to LF | to end] ]
 ]
 
 ;; Input completion function.
 complete-input: function [
 	input     [string!] "Current line to be completed"
 	/with ctx [object!] "Optional context to search words instead of the user's context."
-	return:   [block! ] "[start-part best-matches]"
+	return:   [block! ] "[start matches]"
 ][
 	part: any [
 		find/last/tail input SP
@@ -154,15 +219,15 @@ complete-input: function [
 			part: as file! next part
 			path-parts: split-path part
 			files: sort read path-parts/1
-			best-matches: copy []
+			matches: copy []
 			foreach file files [
 				if parse file [part to end][
-					append best-matches to string! file
+					append matches to string! file
 				]
 			]
 		]
 		find part #"/" [ ; Path completion
-			best-matches: any [
+			matches: any [
 				scan-context system/contexts/sys part
 				scan-context system/contexts/lib part
 				scan-context any [ctx system/contexts/user] part
@@ -178,15 +243,15 @@ complete-input: function [
 				words-cache
 			]
 
-			best-matches: copy []
+			matches: copy []
 			foreach word all-words [
 				if parse word [ part to end ] [
-					append best-matches word
+					append matches word
 				]
 			]
 		]
 	]
-	reduce [as string! part best-matches]
+	reduce [as string! part matches]
 ]
 
 ;; Main function.
@@ -219,19 +284,16 @@ new-console: function/with [
 			if block? s [s: ajoin s]
 			append buffer s
 		]
-		emit-ch: func[c [char!] num [integer!]][
-			append/dup buffer c num
-		]
 		skip-back: does [
 			unless head? pos [
 				pos: back pos
-				-- col
+				col: col - pos/1/width
 			]
 		]
 		skip-next: does [
 			unless tail? pos [
+				col: col + pos/1/width
 				pos: next pos
-				++ col
 			]
 		]
 		skip-to: func[pos][
@@ -258,7 +320,7 @@ new-console: function/with [
 			prev-prompt: none width: 0
 		]
 		reset-tab: does [
-			tab-match: tab-input: none
+			tab-match: tab-line: none
 			tab-col: tab-index: 0
 		]
 		tab-help-line?: false ; is tab help line added?
@@ -275,17 +337,17 @@ new-console: function/with [
 				tab-help?: false
 			]
 		]
+		reset-multiline: does [
+			multiline: none
+			prompt: ml-prompt
+		]
 
-		forever [
-			time: stats/timer
-			key: read-key
-			;unless char? key [
-			;    emit [clear-line mold key LF prompt line]
-			;]
+		catch/quit [ forever [
 			clear buffer
 			prev-col: col
 			term-width: query system/ports/output 'window-cols ; it's in loop, so it's resizing aware
-			switch/default key [
+			time: stats/timer
+			switch/default key: read-key [
 				;- DEL/Backspace  
 				#"^~"
 				#"^H" [
@@ -311,7 +373,6 @@ new-console: function/with [
 							tmp: pos
 							skip-to-next-delimiter
 							pos: remove/part tmp pos
-							col: prev-col
 						][	;; delete following char
 							pos: remove pos
 						]
@@ -322,43 +383,66 @@ new-console: function/with [
 				]
 				;- ENTER          
 				#"^M" [
-					unless empty? line [
+					if empty? line [
+						prin ajoin [unless multiline [clear-line] LF prompt]
+						continue
+					]
+					unless same? line history/1 [
+						insert history copy line
+						history-pos: 0
+					]
+					either multiline [
+						res: try [transcode code: ajoin [ajoin/with multiline LF LF line]]
+					][	res: try [transcode code: line]]
+
+					either error? res [
+						if ml-type: acceptable-code code [
+							unless multiline [
+								multiline: clear []
+								ml-prompt: :prompt  ;; store original prompt
+								prompt: as-purple append/dup clear "" SP max 2 prompt-width
+							]
+							change back find/last prompt " "  ml-type
+							append multiline copy line
+							pos: clear line
+							emit [LF prompt]
+							col: prev-col: 0
+							prin buffer
+							continue
+						]
 						prin LF
-						unless same? line history/1 [
-							insert history copy line
-							history-pos: 0
+						reset-multiline
+					][
+						prin LF
+						if multiline [ reset-multiline ]
+						code: bind/new/set res eval-ctx
+						code: bind code system/contexts/lib
+						set/any 'res try/all [
+							catch/quit code 
 						]
-						code: try [transcode line]
-						either error? code [
-							;@@ TODO: handle multiline input here
-							res: code
-						][
-							code: bind/new/set code eval-ctx
-							code: bind code system/contexts/lib
-							set/any 'res try/all code
-						]
-						pos: clear line
-						col: prev-col: 0
-						clear-tab-help
-						tab-help-line?: false
-						case [
-							unset? :res [] ;; ignore
-							error? :res [
-								foreach line split-lines form :res [
-									emit as-purple line
-									emit LF
-								]
+					]
+
+					pos: clear line
+					col: prev-col: 0
+					clear-tab-help
+					tab-help-line?: false
+					case [
+						unset? :res [] ;; ignore
+						error? :res [
+							foreach line split-lines form :res [
+								emit as-purple line
 								emit LF
 							]
-							'else [emit [as-green "== " mold res LF]]
+							emit LF
 						]
+						'else [emit [as-green "== " mold res LF]]
 					]
 					emit [clear-line prompt]
 					reset-tab
 				]
 				;- CTRL+C          
 				#"^C" [
-					prin clear-line
+					prin [clear-line "[CTRL+C]"]
 					break
 				]
 				;- CTRL+A - move to start
@@ -381,6 +465,7 @@ new-console: function/with [
 				]
 				;- escape          
 				#"^[" escape [
+					if multiline [ reset-multiline append line " " ]
 					unless empty? line [
 						emit [LF as-purple"(escape)" LF prompt]
 						pos: clear line
@@ -405,36 +490,38 @@ new-console: function/with [
 							]
 							if any [
 								not tab-match
-								tab-input != line
+								tab-line != line
 							][
 								tab-index: 0
 								tab-match: none
-								tab-input: line
+								tab-line:  line
 								tab-col:   col
-								tab-data: complete-input/with line eval-ctx
+								tab-result: complete-input/with line eval-ctx
 								
 							]
-							set [start-part: best-matches:] tab-data
-							if empty? best-matches [ continue ]
-							either any [
-								all [system/state/shift? not single? best-matches]
-								key = 'backtab
-							] [
-								;; SHIFT+TAB — rotate back
+							set [start: matches:] tab-result
+							if empty? matches [ continue ]
+							;; TAB cycles forward, SHIFT+TAB (backtab) cycles backward
+							;; Strip previous cycled match if any
+							if tab-col > 0 [
+								skip-to tab-col
+								emit "^[[K"
+							]
+							either key = 'backtab [
 								if zero? tab-index: tab-index - 1 [
-									tab-index: length? best-matches
+									tab-index: length? matches
 								]
-							][	;; TAB cycling through matches
-								;; Strip previous cycled match if any
-								tab-index: 1 + mod tab-index length? best-matches
+							][
+								tab-index: 1 + mod tab-index length? matches
 							]
 
-							tab-match: either find start-part #"/" [
-								remove next find/last start-part #"/"
-								best-matches/:tab-index
-							][	find/match/tail best-matches/:tab-index start-part ]
-							; on first <TAB> press, add help line
-							if all [not tab-help-line? tab-index = 1] [
+							tab-match: either find start #"/" [
+								remove next find/last start #"/"
+								matches/:tab-index
+							][	find/match/tail matches/:tab-index start ]
+
+							; on first tab/backtab press, add help line
+							if not tab-help-line? [
 								tab-help?: true
 								tab-help-line?: true
 								emit LF
@@ -447,27 +534,24 @@ new-console: function/with [
 
 							width: 0
 
-							repeat i length? best-matches [
+							repeat i length? matches [
 								idx: i + tab-offset
-								width: width + 1 + length? best-matches/:idx
-							;	print [width term-width]
-							;	print [max-tab tab-index]
+								width: width + 1 + length? matches/:idx
 								if max-tab = tab-index [
 									tab-offset: tab-index - 1
 									tab-dirty?: true
 									break
 								]
 								if width > term-width [
-								;	tab-offset: tab-offset + 1
 									max-tab: idx
 									break
 								]
 								either idx = tab-index [
 									emit highlight
-									emit best-matches/:idx
+									emit matches/:idx
 									emit reset-style
 								] [
-									emit best-matches/:idx
+									emit matches/:idx
 								]
 								emit space
 							]
@@ -484,12 +568,6 @@ new-console: function/with [
 							append pos tab-match
 							emit pos
 							skip-to-end
-								emit save-cur
-								emit "^[[H"
-								emit max-tab
-								emit space
-								emit tab-index
-								emit rest-cur
 						]
 					]
 				]
@@ -555,7 +633,7 @@ new-console: function/with [
 			;; Move cursor only if really changed its position.
 			if prev-col != col [skip-to col]
 			prin buffer
-		]
+		]] ;=catch/quit
 	] :ctx
 	unless prompt [prompt-counter: prompt-counter - 1]
 	#(unset) ;; return unset on exit
