@@ -2,8 +2,8 @@ Rebol [
 	Title:  "Rebol Console"
 	Type:    module
 	Name:    console
-	Date:    1-Apr-2026
-	Version: 0.3.0
+	Date:    11-Apr-2026
+	Version: 0.3.1
 	Author: [@Oldes @PCarlsson @Rebolek]
 	Home:    https://github.com/Oldes/Rebol-Console
 	License: MIT
@@ -299,12 +299,20 @@ new-console: function/with [
 			col: line/width
 		]
 		skip-to-prev-delimiter: does [
-			while [ find delimiters pos/-1 ][ skip-back ]
-			until [ skip-back any [head? pos  find delimiters pos/-1] ]
+			;; skip any delimiters immediately to the left of `pos`
+			while [ all [not head? pos find delimiters pos/-1 ]][ skip-back ]
+			;; then keep going left until we hit the head or another delimiter
+			unless head? pos [
+				until [ skip-back any [head? pos  find delimiters pos/-1] ]
+			]
 		]
 		skip-to-next-delimiter: does [
-			while [ find delimiters pos/1 ][ skip-next ]
-			until [ skip-next any [tail? pos  find delimiters pos/1] ]
+			;; skip any delimiters immediately to the right of `pos`
+			while [ all [not tail? pos find delimiters pos/1 ]][ skip-next ]
+			;; then keep going right until we hit the tail or another delimiter
+			unless tail? pos [
+				until [ skip-next any [tail? pos  find delimiters pos/1] ]
+			]
 		]
 		prompt-width: function/with [][
 			either prev-prompt = prompt [ width ][
