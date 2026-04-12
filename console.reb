@@ -485,7 +485,6 @@ new-console: function/with [
 			clear buffer
 			prev-col: col
 			term-width: query system/ports/output 'window-cols ; it's in loop, so it's resizing aware
-			time: stats/timer
 							emit tui compose [
 								save
 								0x0
@@ -510,7 +509,6 @@ new-console: function/with [
 								reset
 								restore
 							]
-			switch/default key: read-key [
 			time: stats/timer
 			key: read-key
 			if eval-ctx/debug? [
