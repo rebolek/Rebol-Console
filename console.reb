@@ -433,10 +433,12 @@ new-console: function/with [
 		tab-dirty?: false
 		clear-tab-help: does [
 			if tab-help? [
-				emit save-cur
-				emit move-down
-				emit clear-line
-				emit rest-cur
+				emit tui [
+					save
+					down
+					clear line
+					restore
+				]
 				tab-help?: false
 			]
 		]
@@ -683,16 +685,11 @@ new-console: function/with [
 
 							emit tui compose [
 								save
-								0x0
-								bg blue
-								"matches: "
-								bold white (form length? matches)
-								" "
+								0x0 bg blue "matches: "
+								bold white (form length? matches) #" "
 								reset
-								bg blue
-								" index: "
-								bold white (form tab-index)
-								" "
+								bg blue " index: "
+								bold white (form tab-index) #" "
 								(matches/:tab-index)
 								black
 								(copy/part form at matches tab-index 20)
