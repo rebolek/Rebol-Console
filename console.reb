@@ -87,6 +87,7 @@ tui: function [dialect [block!] /local value] [
 	clearing: [
 			['cls  | 'clear 'screen] (emit/csi "2J")
 		|	'clear 'line (emit/csi "2K")
+		|	'clear 'to 'end (emit/csi #"K")
 	]
 	parse dialect [
 		some [
@@ -98,6 +99,7 @@ tui: function [dialect [block!] /local value] [
 		|	boxes
 		|	scrolling
 		|	clearing
+		|	'newline (emit #"^/")
 		|	set value string! (emit value)
 		]
 	]
@@ -363,7 +365,7 @@ new-console: function/with [
 	]
 	ctx/eval-ctx: context [
 		new-console: :system/modules/console/new-console
-		debug?: off ;; console debugging output
+		debug?: on ;; console debugging output
 	]
 
 	system/state/quit?: false
@@ -469,15 +471,16 @@ new-console: function/with [
 			max-cols: query system/ports/output 'window-cols 
 			txt: reform txt
 			if txt/length >= max-cols [ 
-				clear skip txt max-cols - 3
-				append txt "..."
+				clear skip txt max-cols - 1
+				append txt "…"
 			]
 
-			prin ajoin [
-				"^/^[[K" ;= next line + clear to end
-				txt      ;= content to print
-				"^[[A"   ;= line up
-				"^[[" (prompt-width + col + 1) #"G" ;= goto column
+			prin tui compose [
+				newline
+				clear line
+				(txt)
+				up
+				col (prompt-width + col + 1)
 			]
 		]
 
@@ -485,6 +488,7 @@ new-console: function/with [
 			clear buffer
 			prev-col: col
 			term-width: query system/ports/output 'window-cols ; it's in loop, so it's resizing aware
+							comment {
 							emit tui compose [
 								save
 								0x0
@@ -509,10 +513,11 @@ new-console: function/with [
 								reset
 								restore
 							]
+							}
 			time: stats/timer
 			key: read-key
 			if eval-ctx/debug? [
-				show-status ["key:" mold key "ctrl:" system/state/control? "shft:" system/state/shift?]
+				show-status ["key:" mold key "ctrl:" system/state/control? "shift:" system/state/shift?]
 			]
 			switch/default key [
 				;- DEL/Backspace  
@@ -712,6 +717,7 @@ new-console: function/with [
 							insert mark: back at current-line index? mark tui [invert]
 							insert find mark space tui [reset]
 							; on all <TAB> presses, show help
+							comment {
 							emit tui compose [
 								save
 								down
@@ -720,12 +726,14 @@ new-console: function/with [
 								(head current-line)
 								restore
 							]
+							}
+							show-status head current-line
 
 							tab-match: find/match/tail matches/:tab-index start
 							append pos tab-match
 							emit pos
 							skip-to-end
-
+{
 							emit tui compose [
 								save
 								0x0 bg blue "matches: "
@@ -745,7 +753,7 @@ new-console: function/with [
 								reset
 								restore
 							]
-
+}
 
 						]
 					]
